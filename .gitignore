@@ -1,0 +1,22 @@
+# Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Environnements & secrets
+.env
+*.env
+.venv/
+secrets*.json
+*.publishsettings
+
+# Données locales
+data/
+*.parquet
+*.csv
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
