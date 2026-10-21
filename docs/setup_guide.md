@@ -100,13 +100,26 @@ abfss://<container>@<storage_account>.dfs.core.windows.net/
 ## 5. Traitements Databricks
 
 1. Créer un **cluster** (compute) pour exécuter les notebooks
-2. Exécuter dans l'ordre :
+2. Notebooks (exécutés dans cet ordre, automatiquement par ADF — voir §6) :
    - [`01_bronze_ingest_athletes`](../databricks/01_bronze_ingest_athletes.ipynb)
    - [`02_silver_transform_athletes`](../databricks/02_silver_transform_athletes.ipynb)
    - [`03_gold_build_BI_tables`](../databricks/03_gold_build_BI_tables.ipynb)
 
 ---
 
-## 6. Azure Synapse Analytics
+## 6. Orchestration du pipeline dans ADF
+
+Les notebooks Databricks sont intégrés au **même pipeline** que l'ingestion :
+
+1. Créer un **Linked Service Azure Databricks** dans ADF (workspace + cluster)
+2. Ajouter après l'activité *Copy* trois activités **Notebook** pointant vers `01_bronze_ingest_athletes`, `02_silver_transform_athletes`, `03_gold_build_BI_tables`
+3. Relier les activités par des dépendances **On success** : Copy → 01 → 02 → 03
+4. Tester avec **Debug** / *Trigger now*, puis **Publish all**
+5. Ajouter un **Schedule Trigger** (*Add trigger → New/Edit*) avec la date de début et la récurrence souhaitées
+6. Suivre les exécutions dans **Monitor → Pipeline runs**
+
+---
+
+## 7. Azure Synapse Analytics
 
 Les tables Gold sont exportées en **Parquet** dans `gold/asa_export/<table>/` (notebook 03). Synapse lit ces fichiers depuis ADLS Gen2 pour le calcul des KPIs en SQL et sert de source au dashboard **Power BI**.

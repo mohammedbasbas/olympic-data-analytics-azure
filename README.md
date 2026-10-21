@@ -60,6 +60,7 @@ On-Prem SQL Server ──(ADF + Self-Hosted IR)──▶ ADLS Gen2 [bronze]  (Pa
                                         Azure Synapse Analytics (SQL)
                                                    ▼
                                                Power BI
+        Orchestration : un pipeline ADF unique (Copy → Notebook 01 → 02 → 03) déclenché par un Schedule Trigger
         Sécurité transverse : Microsoft Entra ID (Service Principal, RBAC) + Azure Key Vault
 ```
 
@@ -70,7 +71,7 @@ On-Prem SQL Server ──(ADF + Self-Hosted IR)──▶ ADLS Gen2 [bronze]  (Pa
 | Couche | Service | Rôle |
 |---|---|---|
 | Source | SQL Server (on-premise) | Table `dbo.athlete_events` |
-| Ingestion | Azure Data Factory + Self-Hosted Integration Runtime | Copie SQL Server → ADLS Gen2 (Parquet) |
+| Ingestion & orchestration | Azure Data Factory + Self-Hosted Integration Runtime | Copie SQL Server → ADLS Gen2 (Parquet), exécution des notebooks Databricks, trigger planifié |
 | Stockage | ADLS Gen2 (namespace hiérarchique) | Containers `bronze`, `silver`, `gold` |
 | Traitement | Azure Databricks (PySpark, Spark SQL, Delta Lake) | Nettoyage, transformation, modélisation |
 | Serving | Azure Synapse Analytics | Requêtes SQL / KPIs sur la couche Gold |
@@ -113,8 +114,9 @@ olympic-data-analytics-azure/
 | 5 | **Bronze** : lecture des données brutes | [`01_bronze_ingest_athletes`](databricks/01_bronze_ingest_athletes.ipynb) |
 | 6 | **Silver** : nettoyage, normalisation, enrichissement → Delta | [`02_silver_transform_athletes`](databricks/02_silver_transform_athletes.ipynb) |
 | 7 | **Gold** : modélisation en étoile + export Parquet pour Synapse | [`03_gold_build_BI_tables`](databricks/03_gold_build_BI_tables.ipynb) |
-| 8 | **Serving** : exposition de la couche Gold dans Synapse Analytics, calcul de KPIs SQL | [Guide §6](docs/setup_guide.md#6-azure-synapse-analytics) |
-| 9 | **Visualisation** : dashboard Power BI (5 pages, mesures DAX) | [`powerbi/`](powerbi/) · [docs](docs/dashboard.md) |
+| 8 | **Orchestration** : pipeline ADF unique *Copy* → *Notebook* 01 → 02 → 03, déclenché par un **Schedule Trigger** | [Guide §6](docs/setup_guide.md#6-orchestration-du-pipeline-dans-adf) |
+| 9 | **Serving** : exposition de la couche Gold dans Synapse Analytics, calcul de KPIs SQL | [Guide §7](docs/setup_guide.md#7-azure-synapse-analytics) |
+| 10 | **Visualisation** : dashboard Power BI (5 pages, mesures DAX) | [`powerbi/`](powerbi/) · [docs](docs/dashboard.md) |
 
 ---
 
@@ -148,7 +150,20 @@ Résultat écrit en **Delta Lake** : `silver/athletes_transformed_data/`.
 - 1 table de faits construite par **jointures null-safe (`<=>`)** pour ne pas perdre les lignes avec attributs nuls.
 - Tables **Delta** dans `gold/dimensions/` et `gold/fact_table/`, plus des **snapshots Parquet** dans `gold/asa_export/` lus par Synapse.
 
-### 5. Serving & BI
+### 5. Orchestration — pipeline ADF de bout en bout
+Le pipeline Data Factory enchaîne toute la chaîne, sans intervention manuelle :
+
+```
+[Copy SQL Server → bronze] ──▶ [Notebook 01_bronze] ──▶ [Notebook 02_silver] ──▶ [Notebook 03_gold]
+              ▲
+     Schedule Trigger (exécution planifiée)
+```
+
+- Activités **Notebook** (Linked Service Azure Databricks) reliées par des dépendances *On success* : une étape ne démarre que si la précédente a réussi.
+- Un **Schedule Trigger** lance le pipeline automatiquement à la fréquence définie.
+- Suivi des exécutions dans l'onglet **Monitor** d'ADF.
+
+### 6. Serving & BI
 Synapse Analytics expose les tables Gold (Parquet) en SQL ; Power BI s'y connecte pour le dashboard.
 
 ---
@@ -238,16 +253,16 @@ Détails : [docs/dashboard.md](docs/dashboard.md)
 
 1. Créer les ressources Azure et les containers → [docs/setup_guide.md](docs/setup_guide.md)
 2. Restaurer `athlete_events` dans SQL Server et exécuter [`sql/onprem_sqlserver_setup.sql`](sql/onprem_sqlserver_setup.sql)
-3. Configurer le SHIR et lancer le pipeline ADF (Copy → `bronze`)
-4. Importer le dossier `databricks/` dans un workspace Databricks, renseigner `<CLIENT_ID>` / `<TENANT_ID>` (et le nom du storage account) dans `00_auth`
-5. Exécuter dans l'ordre : `01_bronze` → `02_silver` → `03_gold`
+3. Importer le dossier `databricks/` dans un workspace Databricks, renseigner `<CLIENT_ID>` / `<TENANT_ID>` (et le nom du storage account) dans `00_auth`
+4. Dans ADF : configurer le SHIR, puis créer le pipeline *Copy* → *Notebook* `01_bronze` → `02_silver` → `03_gold`
+5. Lancer le pipeline (*Trigger now*) puis ajouter un **Schedule Trigger**
 6. Exposer `gold/asa_export/` dans Synapse puis ouvrir le `.pbix` et mettre à jour la source
 
 ---
 
 ## 🔭 Pistes d'amélioration
 
-- Orchestrer les notebooks Databricks depuis ADF (pipeline unique + triggers planifiés)
+- Alertes sur les échecs du pipeline ADF (Azure Monitor) et paramétrage du pipeline (chemins, dates)
 - Chargement incrémental (watermark / Delta `MERGE`) au lieu de `overwrite`
 - Tests de qualité de données (Great Expectations / expectations Delta Live Tables)
 - Unity Catalog pour la gouvernance et le lineage
@@ -258,6 +273,8 @@ Détails : [docs/dashboard.md](docs/dashboard.md)
 ## 👤 Auteur
 
 **Mohammed Basbas** — Data Analyst / Data Engineer
-Ingénieur Data Science & Cloud Computing (ENSA Oujda) · Master 2 Technologies de l'Information (Université de Franche-Comté)
 
-[LinkedIn](https://www.linkedin.com/in/mohammed-basbas)
+Ingénieur en Data Science & Cloud Computing, je conçois des solutions data de bout en bout : de l'ingestion et de la transformation des données (PySpark, SQL, Azure, GCP) jusqu'aux tableaux de bord Power BI qui aident à la décision. Ce projet illustre la mise en place d'une plateforme analytique complète sur Azure.
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-mohammed--basbas-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/mohammed-basbas)
+[![Email](https://img.shields.io/badge/Email-simobasbas%40gmail.com-D14836?style=flat&logo=gmail&logoColor=white)](mailto:simobasbas@gmail.com)
