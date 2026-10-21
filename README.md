@@ -71,7 +71,7 @@ On-Prem SQL Server ──(ADF + Self-Hosted IR)──▶ ADLS Gen2 [bronze]  (Pa
 | Couche | Service | Rôle |
 |---|---|---|
 | Source | SQL Server (on-premise) | Table `dbo.athlete_events` |
-| Ingestion & orchestration | Azure Data Factory + Self-Hosted Integration Runtime | Copie SQL Server → ADLS Gen2 (Parquet), exécution des notebooks Databricks, trigger planifié |
+| Ingestion & orchestration | Azure Data Factory + Self-Hosted Integration Runtime | Pipeline unique : copie SQL Server → ADLS Gen2 (Parquet) puis exécution des notebooks Databricks, déclenché par un trigger planifié |
 | Stockage | ADLS Gen2 (namespace hiérarchique) | Containers `bronze`, `silver`, `gold` |
 | Traitement | Azure Databricks (PySpark, Spark SQL, Delta Lake) | Nettoyage, transformation, modélisation |
 | Serving | Azure Synapse Analytics | Requêtes SQL / KPIs sur la couche Gold |
@@ -114,7 +114,7 @@ olympic-data-analytics-azure/
 | 5 | **Bronze** : lecture des données brutes | [`01_bronze_ingest_athletes`](databricks/01_bronze_ingest_athletes.ipynb) |
 | 6 | **Silver** : nettoyage, normalisation, enrichissement → Delta | [`02_silver_transform_athletes`](databricks/02_silver_transform_athletes.ipynb) |
 | 7 | **Gold** : modélisation en étoile + export Parquet pour Synapse | [`03_gold_build_BI_tables`](databricks/03_gold_build_BI_tables.ipynb) |
-| 8 | **Orchestration** : pipeline ADF unique *Copy* → *Notebook* 01 → 02 → 03, déclenché par un **Schedule Trigger** | [Guide §6](docs/setup_guide.md#6-orchestration-du-pipeline-dans-adf) |
+| 8 | **Orchestration** : un pipeline ADF unique qui enchaîne l'activité *Copy* (SQL Server → Bronze) puis les *Notebooks* 01 → 02 → 03, déclenché par un **Schedule Trigger** | [Guide §6](docs/setup_guide.md#6-orchestration-du-pipeline-dans-adf) |
 | 9 | **Serving** : exposition de la couche Gold dans Synapse Analytics, calcul de KPIs SQL | [Guide §7](docs/setup_guide.md#7-azure-synapse-analytics) |
 | 10 | **Visualisation** : dashboard Power BI (5 pages, mesures DAX) | [`powerbi/`](powerbi/) · [docs](docs/dashboard.md) |
 
@@ -151,16 +151,22 @@ Résultat écrit en **Delta Lake** : `silver/athletes_transformed_data/`.
 - Tables **Delta** dans `gold/dimensions/` et `gold/fact_table/`, plus des **snapshots Parquet** dans `gold/asa_export/` lus par Synapse.
 
 ### 5. Orchestration — pipeline ADF de bout en bout
-Le pipeline Data Factory enchaîne toute la chaîne, sans intervention manuelle :
+Un **pipeline Data Factory unique** orchestre **toute la chaîne**, de l'ingestion à la couche Gold, sans intervention manuelle :
 
 ```
-[Copy SQL Server → bronze] ──▶ [Notebook 01_bronze] ──▶ [Notebook 02_silver] ──▶ [Notebook 03_gold]
-              ▲
-     Schedule Trigger (exécution planifiée)
+Schedule Trigger (exécution planifiée)
+      │  déclenche tout le pipeline
+      ▼
+┌─────────────────────────────────────── Pipeline ADF ───────────────────────────────────────┐
+│ Copy (SQL Server → bronze) ─▶ Notebook 01_bronze ─▶ Notebook 02_silver ─▶ Notebook 03_gold │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
+          (chaque flèche = dépendance « On success »)
 ```
 
-- Activités **Notebook** (Linked Service Azure Databricks) reliées par des dépendances *On success* : une étape ne démarre que si la précédente a réussi.
-- Un **Schedule Trigger** lance le pipeline automatiquement à la fréquence définie.
+- **Activité Copy** (SQL Server on-premise → ADLS Gen2, via le Self-Hosted IR) : première étape du pipeline.
+- **3 activités Notebook** (Linked Service Azure Databricks) : Bronze → Silver → Gold.
+- Toutes les activités sont reliées par des dépendances *On success* : une étape ne démarre que si la précédente a réussi.
+- Le **Schedule Trigger** est attaché au pipeline : à chaque exécution planifiée, il relance **l'ensemble** (Copy + notebooks).
 - Suivi des exécutions dans l'onglet **Monitor** d'ADF.
 
 ### 6. Serving & BI

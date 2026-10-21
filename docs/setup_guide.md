@@ -109,13 +109,13 @@ abfss://<container>@<storage_account>.dfs.core.windows.net/
 
 ## 6. Orchestration du pipeline dans ADF
 
-Les notebooks Databricks sont intégrés au **même pipeline** que l'ingestion :
+Un **pipeline unique** orchestre toute la chaîne : l'activité **Copy** (SQL Server on-premise → ADLS Gen2) puis les notebooks Databricks.
 
 1. Créer un **Linked Service Azure Databricks** dans ADF (workspace + cluster)
 2. Ajouter après l'activité *Copy* trois activités **Notebook** pointant vers `01_bronze_ingest_athletes`, `02_silver_transform_athletes`, `03_gold_build_BI_tables`
 3. Relier les activités par des dépendances **On success** : Copy → 01 → 02 → 03
 4. Tester avec **Debug** / *Trigger now*, puis **Publish all**
-5. Ajouter un **Schedule Trigger** (*Add trigger → New/Edit*) avec la date de début et la récurrence souhaitées
+5. Ajouter un **Schedule Trigger** au pipeline (*Add trigger → New/Edit*) avec la date de début et la récurrence souhaitées : il relance **tout le pipeline** (Copy + 3 notebooks)
 6. Suivre les exécutions dans **Monitor → Pipeline runs**
 
 ---
